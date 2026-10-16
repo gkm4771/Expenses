@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Expenses">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f3f1ec">
+<title>Expenses</title>
+<style>
+:root{--bg:#f3f1ec;--card:#fff;--ink:#1c2321;--mute:#7b837f;--line:#e4e1d8;--in:#1f7a5a;--out:#c2432f;--inv:#3a5ba0;--accent:#1c2321}
+@media(prefers-color-scheme:dark){:root{--bg:#121514;--card:#1c211f;--ink:#eceee9;--mute:#8c9590;--line:#2b322f;--in:#4cc49a;--out:#ee7a66;--inv:#7f9fe0;--accent:#eceee9}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;font-variant-numeric:tabular-nums;padding-top:env(safe-area-inset-top,0)}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 6px}
+h1{font-size:30px;font-weight:700;letter-spacing:-.5px;margin:0}
+.ib{background:none;border:0;color:var(--mute);font-size:15px;padding:8px}
+main{padding:0 16px calc(110px + env(safe-area-inset-bottom,0));overflow-y:auto;height:calc(100% - 64px)}
+section{display:none}section.on{display:block}
+.card{background:var(--card);border-radius:18px;padding:16px;margin:12px 0}
+.cur{font-size:13px;color:var(--mute);margin-bottom:2px}
+.big{font-size:36px;font-weight:700;letter-spacing:-1px}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;font-size:13px;color:var(--mute)}
+.stats b{display:block;font-size:16px;color:var(--ink);font-weight:600}
+h2{font-size:14px;color:var(--mute);font-weight:600;margin:22px 4px 6px}
+.acc{padding:12px 0;border-top:1px solid var(--line)}.acc:first-child{border:0}
+.acc small{color:var(--mute)}
+.tx{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.tx:first-child{border:0}
+.tx .t{font-weight:600}.tx small{color:var(--mute);display:block}
+.amt{font-weight:600;white-space:nowrap}.Income{color:var(--in)}.Expense{color:var(--out)}.Investment{color:var(--inv)}.Transfer{color:var(--mute)}
+input,select,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 12px;-webkit-appearance:none;appearance:none}
+label{font-size:13px;color:var(--mute)}
+.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--bg);padding:4px;border-radius:12px;margin-bottom:14px}
+.seg button{border:0;background:none;color:var(--ink);padding:9px 0;border-radius:9px;font:inherit;font-size:14px}
+.seg button.on{background:var(--card);box-shadow:0 1px 3px #0002;font-weight:600}
+.btn{width:100%;border:0;border-radius:14px;padding:15px;font:inherit;font-weight:600;background:var(--accent);color:var(--bg)}
+.btn.alt,#runrec{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.btn.del{background:none;color:var(--out);margin-top:6px}
+.bar{height:8px;background:var(--bg);border-radius:4px;margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--in);border-radius:4px}.bar i.over{background:var(--out)}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-around;align-items:center;background:var(--card);border-top:1px solid var(--line);padding:8px 10px calc(8px + env(safe-area-inset-bottom,0))}
+nav button{background:none;border:0;color:var(--mute);font:inherit;font-size:12px;padding:6px 14px}
+nav button.on{color:var(--ink);font-weight:600}
+nav .plus{width:54px;height:54px;border-radius:27px;background:var(--accent);color:var(--bg);font-size:30px;line-height:1;padding:0;margin-top:-22px;box-shadow:0 4px 14px #0003}
+.sheet{position:fixed;inset:0;background:#0006;display:none;align-items:flex-end;z-index:5}
+.sheet.on{display:flex}
+.sheet>div{background:var(--card);width:100%;max-height:92%;overflow-y:auto;border-radius:22px 22px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom,0))}
+.sheet h3{margin:0 0 14px;font-size:20px}
+.msg{padding:30px 10px;text-align:center;color:var(--mute)}
+.err{color:var(--out)}
+.mrow{display:flex;gap:8px;align-items:center;margin:8px 0}.mrow input{margin:0}
+</style>
+</head>
+<body>
+<header><h1 id="title">Home</h1><button class="ib" id="sync">Refresh</button></header>
+<main>
+  <section id="home"></section>
+  <section id="activity">
+    <input id="q" type="search" placeholder="Search transactions">
+    <div class="card" id="txlist"></div>
+  </section>
+  <section id="budgets"></section>
+  <section id="more">
+    <div class="card"><label>Web app URL</label><input id="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off">
+    <label>Secret key</label><input id="key" type="password" autocapitalize="off" autocorrect="off">
+    <button class="btn" id="saveurl">Save and connect</button><p class="cur" id="conn"></p></div>
+    <h2>Manage</h2>
+    <div class="card"><button class="btn" id="newacc">Add account</button><button class="btn" id="newcat" style="margin-top:8px">Add category</button></div>
+    <h2>Recurring</h2>
+    <div class="card" id="reclist"></div>
+    <button class="btn" id="newrec">New recurring transaction</button>
+    <button class="btn" id="runrec" style="margin-top:8px">Create due transactions</button>
+  </section>
+</main>
+<nav>
+  <button data-tab="home" class="on">Home</button>
+  <button data-tab="activity">Activity</button>
+  <button class="plus" id="add" aria-label="Add transaction">+</button>
+  <button data-tab="budgets">Budgets</button>
+  <button data-tab="more">Settings</button>
+</nav>
+<div class="sheet" id="sheet"><div id="form"></div></div>
+
+<script>
+const $=s=>document.querySelector(s), TYPES=["Expense","Income","Investment","Transfer"];
+const S={accounts:[],cats:[],tx:[],bal:[],dash:null,bud:[],rec:[],month:new Date().toISOString().slice(0,7)};
+let URL_=localStorage.getItem("api")||"",KEY=localStorage.getItem("key")||"";
+
+/* ---------- API (POST sent as text/plain so Apps Script needs no CORS preflight) ---------- */
+async function get(action,p={}){
+  const u=new window.URL(URL_);u.searchParams.set("action",action);if(KEY)u.searchParams.set("key",KEY);
+  Object.entries(p).forEach(([k,v])=>v&&u.searchParams.set(k,v));
+  const r=await(await fetch(u)).json();if(!r.success)throw new Error(r.error||"Request failed");return r;
+}
+async function post(body){
+  const r=await(await fetch(URL_,{method:"POST",body:JSON.stringify({...body,key:KEY})})).json();
+  if(!r.success)throw new Error(r.error||"Request failed");return r;
+}
+
+/* ---------- helpers ---------- */
+const g=(o,k)=>o[k]!==undefined?o[k]:"";
+const tid=t=>t["Transaction ID"]||t["ID"]||Object.values(t)[0];
+const money=(n,c)=>(c||"")+" "+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:c==="OMR"?3:2,maximumFractionDigits:c==="OMR"?3:2});
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const day=t=>String(g(t,"Date")).slice(0,10);
+const sign=t=>({Income:"+",Expense:"−",Investment:"−",Transfer:""}[g(t,"Type")]||"");
+
+/* ---------- load ---------- */
+async function load(){
+  if(!URL_){tab("more");$("#conn").textContent="Paste your Apps Script web app URL to begin.";return}
+  $("#sync").textContent="…";
+  try{
+    const [a,c,t,b,d,bu,rc]=await Promise.all([get("accounts"),get("categories"),get("transactions"),get("accountBalances"),get("dashboard"),get("budgets"),get("recurring").catch(()=>({recurring:[]}))]);
+    S.accounts=a.accounts.filter(x=>String(x.Active).toLowerCase()!=="false");
+    S.cats=c.categories;S.tx=t.transactions.reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.rec=rc.recurring;
+    $("#conn").textContent="Connected";render();
+  }catch(e){$("#conn").innerHTML='<span class="err">'+esc(e.message)+'</span>';
+    $("#home").innerHTML='<div class="msg err">Could not load data.<br>'+esc(e.message)+'<br>Check the URL and that access is set to Anyone.</div>'}
+  $("#sync").textContent="Refresh";
+}
+
+/* ---------- render ---------- */
+function render(){home();activity();budgets();recur()}
+function home(){
+  const d=S.dash;let h="";
+  ["OMR","INR"].forEach(c=>{const s=d[c];if(!s)return;
+    h+=`<div class="card"><div class="cur">Net, ${c}</div><div class="big">${money(s.income-s.expenses-s.investments,"")}</div>
+    <div class="stats"><span>Income<b class="Income">${money(s.income,"")}</b></span><span>Spent<b class="Expense">${money(s.expenses,"")}</b></span><span>Invested<b class="Investment">${money(s.investments,"")}</b></span></div></div>`});
+  h+="<h2>Accounts</h2><div class='card'>"+(S.bal.map(b=>`<div class="acc row"><div>${esc(b.accountName)}<br><small>${esc(b.accountType)}</small></div><b>${money(b.currentBalance,b.currency)}</b></div>`).join("")||'<div class="msg">No accounts yet</div>')+"</div>";
+  h+="<h2>Recent</h2><div class='card'>"+txRows(S.tx.slice(0,5))+"</div>";
+  $("#home").innerHTML=h;
+}
+function txRows(list){
+  if(!list.length)return '<div class="msg">No transactions</div>';
+  return list.map(t=>{const ty=g(t,"Type"),to=g(t,"Transfer To Account");
+    return `<div class="tx" data-id="${esc(tid(t))}"><div><span class="t">${esc(g(t,"Description")||g(t,"Category")||ty)}</span>
+    <small>${day(t)} · ${esc(g(t,"Account"))}${to?" → "+esc(to):""}${g(t,"Category")?" · "+esc(g(t,"Category")):""}</small></div>
+    <div class="amt ${ty}">${sign(t)}${money(g(t,"Amount"),"")}<small style="text-align:right">${esc(g(t,"Currency"))}</small></div></div>`}).join("");
+}
+function activity(){
+  const q=$("#q").value.toLowerCase();
+  $("#txlist").innerHTML=txRows(q?S.tx.filter(t=>Object.values(t).join(" ").toLowerCase().includes(q)):S.tx.slice(0,200));
+}
+function budgets(){
+  const rows=S.bud.filter(b=>b.Month===S.month);
+  let h=`<div class="mrow"><input type="month" id="bm" value="${S.month}"><button class="ib" id="addb">Set budget</button></div>`;
+  h+='<div class="card">'+(rows.map(b=>{
+    const spent=S.tx.filter(t=>g(t,"Type")==="Expense"&&day(t).slice(0,7)===S.month&&g(t,"Category")===b.Category&&g(t,"Currency")===b.Currency).reduce((s,t)=>s+Number(g(t,"Amount")),0);
+    const p=b["Budget Amount"]?spent/b["Budget Amount"]*100:0;
+    return `<div class="acc" data-b="${esc(b.Category)}|${b.Currency}|${b["Budget Amount"]}"><div class="row"><span>${esc(b.Category)}</span><b>${money(spent,"")} / ${money(b["Budget Amount"],b.Currency)}</b></div><div class="bar"><i class="${p>100?"over":""}" style="width:${Math.min(p,100)}%"></i></div></div>`}).join("")||'<div class="msg">No budgets for this month</div>')+"</div>";
+  $("#budgets").innerHTML=h;
+  $("#bm").onchange=e=>{S.month=e.target.value||S.month;budgets()};
+  $("#addb").onclick=()=>budgetForm();
+  document.querySelectorAll("[data-b]").forEach(el=>el.onclick=()=>{const[c,cu,a]=el.dataset.b.split("|");budgetForm({c,cu,a})});
+}
+
+/* ---------- forms ---------- */
+function open_(html){$("#form").innerHTML=html;$("#sheet").classList.add("on")}
+function close_(){$("#sheet").classList.remove("on")}
+$("#sheet").onclick=e=>{if(e.target.id==="sheet")close_()};
+
+function txForm(t){
+  const edit=!!t,v=k=>t?g(t,k):"";let type=edit?v("Type"):"Expense";
+  open_(`<h3>${edit?"Edit":"New"} transaction</h3>
+  <div class="seg">${TYPES.map(x=>`<button data-ty="${x}" class="${x===type?"on":""}">${x}</button>`).join("")}</div>
+  <label>Amount</label><input id="f_amt" type="number" inputmode="decimal" step="0.001" value="${v("Amount")}">
+  <label>Account</label><select id="f_acc">${S.accounts.map(a=>`<option ${a["Account Name"]===v("Account")?"selected":""}>${esc(a["Account Name"])} (${esc(a.Currency)})</option>`).join("")}</select>
+  <div id="f_toW"><label>To account</label><select id="f_to"><option value=""></option>${S.accounts.map(a=>`<option value="${esc(a["Account Name"])}" ${a["Account Name"]===v("Transfer To Account")?"selected":""}>${esc(a["Account Name"])}</option>`).join("")}</select></div>
+  <div id="f_catW"><label>Category</label><select id="f_cat"></select></div>
+  <label>Date</label><input id="f_date" type="date" value="${v("Date")?day(t):new Date().toLocaleDateString("en-CA")}">
+  <label>Description</label><input id="f_desc" value="${esc(v("Description"))}">
+  <label>Remarks</label><input id="f_rem" value="${esc(v("Remarks"))}">
+  <p class="err" id="f_err"></p><button class="btn" id="f_save">${edit?"Save changes":"Add transaction"}</button>
+  ${edit?'<button class="btn del" id="f_del">Delete transaction</button>':""}`);
+  const accName=()=>$("#f_acc").value.replace(/ \([A-Z]{3}\)$/,"");
+  const sync=()=>{
+    document.querySelectorAll("[data-ty]").forEach(b=>b.classList.toggle("on",b.dataset.ty===type));
+    $("#f_toW").style.display=type==="Transfer"?"":"none";$("#f_catW").style.display=type==="Transfer"?"none":"";
+    const opts=[...new Set(S.cats.filter(c=>String(g(c,"Type")||"Expense")===type).map(c=>g(c,"Category")))];
+    $("#f_cat").innerHTML='<option value=""></option>'+opts.map(o=>`<option ${o===v("Category")?"selected":""}>${esc(o)}</option>`).join("");
+  };
+  document.querySelectorAll("[data-ty]").forEach(b=>b.onclick=()=>{type=b.dataset.ty;sync()});sync();
+  $("#f_save").onclick=async()=>{
+    const body={action:edit?"updateTransaction":"addTransaction",transactionId:edit?tid(t):undefined,type,account:accName(),
+      transferToAccount:type==="Transfer"?$("#f_to").value:"",category:type==="Transfer"?"":$("#f_cat").value,
+      amount:Number($("#f_amt").value),date:$("#f_date").value,description:$("#f_desc").value,remarks:$("#f_rem").value};
+    $("#f_save").disabled=true;
+    try{await post(body);close_();await load()}catch(e){$("#f_err").textContent=e.message;$("#f_save").disabled=false}
+  };
+  if(edit)$("#f_del").onclick=async()=>{if(!confirm("Delete this transaction?"))return;
+    try{await post({action:"deleteTransaction",transactionId:tid(t)});close_();await load()}catch(e){$("#f_err").textContent=e.message}};
+}
+
+function budgetForm(b){
+  const cats=[...new Set(S.cats.filter(c=>String(g(c,"Type")||"Expense")==="Expense").map(c=>g(c,"Category")))];
+  open_(`<h3>Budget for ${S.month}</h3>
+  <label>Category</label><select id="b_c">${cats.map(c=>`<option ${b&&b.c===c?"selected":""}>${esc(c)}</option>`).join("")}</select>
+  <label>Currency</label><select id="b_cu">${["OMR","INR"].map(c=>`<option ${b&&b.cu===c?"selected":""}>${c}</option>`).join("")}</select>
+  <label>Amount</label><input id="b_a" type="number" inputmode="decimal" value="${b?b.a:""}">
+  <p class="err" id="b_err"></p><button class="btn" id="b_save">Save budget</button>
+  ${b?'<button class="btn del" id="b_del">Delete budget</button>':""}`);
+  const key=()=>({month:S.month,category:$("#b_c").value,currency:$("#b_cu").value});
+  $("#b_save").onclick=async()=>{try{await post({action:"saveBudget",...key(),budgetAmount:Number($("#b_a").value)});close_();await load()}catch(e){$("#b_err").textContent=e.message}};
+  if(b)$("#b_del").onclick=async()=>{try{await post({action:"deleteBudget",...key()});close_();await load()}catch(e){$("#b_err").textContent=e.message}};
+}
+
+function recur(){
+  $("#reclist").innerHTML=S.rec.length?S.rec.map(r=>`<div class="acc row" data-r="${esc(r.recurringId)}"><div>${esc(r.description||r.category||r.type)}<br><small>${r.frequency} · next ${r.nextDate}${r.active?"":" · paused"}</small></div><b class="${r.type}">${money(r.amount,r.currency)}</b></div>`).join(""):'<div class="msg">No recurring items</div>';
+  document.querySelectorAll("[data-r]").forEach(el=>el.onclick=()=>recForm(S.rec.find(x=>x.recurringId===el.dataset.r)));
+}
+function recForm(r){
+  const e=!!r;r=r||{type:"Expense",frequency:"Monthly",active:true,nextDate:new Date().toLocaleDateString("en-CA")};
+  const opt=(l,sel)=>l.map(x=>`<option ${x===sel?"selected":""}>${esc(x)}</option>`).join("");
+  const names=S.accounts.map(a=>a["Account Name"]);
+  open_(`<h3>${e?"Edit":"New"} recurring transaction</h3>
+  <label>Type</label><select id="r_ty">${opt(TYPES,r.type)}</select>
+  <label>Amount</label><input id="r_amt" type="number" inputmode="decimal" value="${r.amount||""}">
+  <label>Account</label><select id="r_acc">${opt(names,r.account)}</select>
+  <label>To account (transfers only)</label><select id="r_to"><option></option>${opt(names,r.transferToAccount)}</select>
+  <label>Category</label><input id="r_cat" list="cl" value="${esc(r.category||"")}"><datalist id="cl">${[...new Set(S.cats.map(c=>g(c,"Category")))].map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
+  <label>Description</label><input id="r_desc" value="${esc(r.description||"")}">
+  <label>Repeats</label><select id="r_fr">${opt(["Weekly","Monthly","Yearly"],r.frequency)}</select>
+  <label>Next date</label><input id="r_date" type="date" value="${r.nextDate}">
+  <label><input type="checkbox" id="r_act" ${r.active?"checked":""} style="width:auto;margin-right:8px">Active</label>
+  <p class="err" id="r_err"></p><button class="btn" id="r_save">Save recurring</button>${e?'<button class="btn del" id="r_del">Delete recurring</button>':""}`);
+  $("#r_save").onclick=async()=>{try{await post({action:"saveRecurring",recurringId:e?r.recurringId:undefined,type:$("#r_ty").value,account:$("#r_acc").value,
+    transferToAccount:$("#r_to").value,category:$("#r_cat").value,amount:Number($("#r_amt").value),description:$("#r_desc").value,
+    frequency:$("#r_fr").value,nextDate:$("#r_date").value,active:$("#r_act").checked});close_();await load()}catch(x){$("#r_err").textContent=x.message}};
+  if(e)$("#r_del").onclick=async()=>{if(!confirm("Delete this recurring item?"))return;try{await post({action:"deleteRecurring",recurringId:r.recurringId});close_();await load()}catch(x){$("#r_err").textContent=x.message}};
+}
+function accForm(){
+  open_(`<h3>Add account</h3><label>Name</label><input id="a_n">
+  <label>Type</label><select id="a_t"><option>Bank</option><option>Cash</option><option>Credit Card</option><option>Wallet</option><option>Investment</option></select>
+  <label>Currency</label><select id="a_c"><option>OMR</option><option>INR</option></select>
+  <label>Opening balance</label><input id="a_b" type="number" inputmode="decimal" value="0">
+  <p class="err" id="a_err"></p><button class="btn" id="a_save">Add account</button>`);
+  $("#a_save").onclick=async()=>{try{await post({action:"addAccount",accountName:$("#a_n").value,accountType:$("#a_t").value,currency:$("#a_c").value,openingBalance:Number($("#a_b").value)});close_();await load()}catch(x){$("#a_err").textContent=x.message}};
+}
+function catForm(){
+  open_(`<h3>Add category</h3><label>Type</label><select id="c_t"><option>Expense</option><option>Income</option><option>Investment</option></select>
+  <label>Category</label><input id="c_c" list="cl2"><datalist id="cl2">${[...new Set(S.cats.map(c=>g(c,"Category")))].map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
+  <label>Subcategory (optional)</label><input id="c_s">
+  <p class="err" id="c_err"></p><button class="btn" id="c_save">Add category</button>`);
+  $("#c_save").onclick=async()=>{try{await post({action:"addCategory",type:$("#c_t").value,category:$("#c_c").value,subcategory:$("#c_s").value});close_();await load()}catch(x){$("#c_err").textContent=x.message}};
+}
+$("#newrec").onclick=()=>S.accounts.length?recForm():alert("Connect your sheet first.");
+$("#newacc").onclick=()=>URL_?accForm():alert("Connect your sheet first.");
+$("#newcat").onclick=()=>URL_?catForm():alert("Connect your sheet first.");
+$("#runrec").onclick=async()=>{try{const r=await post({action:"processRecurring"});alert(r.message);await load()}catch(x){alert(x.message)}};
+
+/* ---------- navigation ---------- */
+function tab(n){
+  document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===n));
+  document.querySelectorAll("nav [data-tab]").forEach(b=>b.classList.toggle("on",b.dataset.tab===n));
+  $("#title").textContent={home:"Home",activity:"Activity",budgets:"Budgets",more:"Settings"}[n];
+}
+document.querySelectorAll("nav [data-tab]").forEach(b=>b.onclick=()=>tab(b.dataset.tab));
+$("#add").onclick=()=>S.accounts.length?txForm():alert("Connect your sheet first.");
+$("#sync").onclick=load;
+$("#q").oninput=activity;
+document.addEventListener("click",e=>{const el=e.target.closest(".tx");if(!el)return;
+  const t=S.tx.find(x=>String(tid(x))===el.dataset.id);if(t)txForm(t)});
+$("#saveurl").onclick=()=>{URL_=$("#url").value.trim();KEY=$("#key").value.trim();localStorage.setItem("api",URL_);localStorage.setItem("key",KEY);tab("home");load()};
+$("#url").value=URL_;$("#key").value=KEY;
+tab("home");load();
+</script>
+</body>
+</html>
