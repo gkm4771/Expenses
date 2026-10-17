@@ -40,6 +40,10 @@ label{font-size:13px;color:var(--mute)}
 .seg button.on{background:var(--card);box-shadow:0 1px 3px #0002;font-weight:600}
 .btn{width:100%;border:0;border-radius:14px;padding:15px;font:inherit;font-weight:600;background:var(--accent);color:var(--bg)}
 .btn.alt,#runrec{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.fb{width:auto;padding:12px 16px;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px}
+.chip{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:20px;padding:7px 13px;font:inherit;font-size:14px}
+.chip.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .btn.del{background:none;color:var(--out);margin-top:6px}
 .bar{height:8px;background:var(--bg);border-radius:4px;margin-top:8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--in);border-radius:4px}.bar i.over{background:var(--out)}
@@ -61,7 +65,7 @@ nav .plus{width:54px;height:54px;border-radius:27px;background:var(--accent);col
 <main>
   <section id="home"></section>
   <section id="activity">
-    <input id="q" type="search" placeholder="Search transactions">
+    <div class="mrow"><input id="q" type="search" placeholder="Search transactions"><button class="btn fb" id="fbtn">Filter</button></div><div class="cur" id="fsum" style="margin:0 4px 4px"></div>
     <div class="card" id="txlist"></div>
   </section>
   <section id="budgets"></section>
@@ -88,7 +92,7 @@ nav .plus{width:54px;height:54px;border-radius:27px;background:var(--accent);col
 
 <script>
 const $=s=>document.querySelector(s), TYPES=["Expense","Income","Investment","Transfer"];
-const S={accounts:[],cats:[],tx:[],bal:[],dash:null,bud:[],rec:[],month:new Date().toISOString().slice(0,7)};
+const S={atype:{},f:{type:new Set(),acct:new Set(),atype:new Set(),cur:new Set(),cat:new Set(),from:"",to:"",min:"",max:""},accounts:[],cats:[],tx:[],bal:[],dash:null,bud:[],rec:[],month:new Date().toISOString().slice(0,7)};
 let URL_=localStorage.getItem("api")||"",KEY=localStorage.getItem("key")||"";
 
 /* ---------- API (POST sent as text/plain so Apps Script needs no CORS preflight) ---------- */
@@ -117,7 +121,7 @@ async function load(){
   try{
     const [a,c,t,b,d,bu,rc]=await Promise.all([get("accounts"),get("categories"),get("transactions"),get("accountBalances"),get("dashboard"),get("budgets"),get("recurring").catch(()=>({recurring:[]}))]);
     S.accounts=a.accounts.filter(x=>String(x.Active).toLowerCase()!=="false");
-    S.cats=c.categories;S.tx=t.transactions.reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.rec=rc.recurring;
+    S.cats=c.categories;S.tx=t.transactions.reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.atype=Object.fromEntries(a.accounts.map(x=>[x["Account Name"],x["Account Type"]||""]));S.rec=rc.recurring;
     $("#conn").textContent="Connected";render();
   }catch(e){$("#conn").innerHTML='<span class="err">'+esc(e.message)+'</span>';
     $("#home").innerHTML='<div class="msg err">Could not load data.<br>'+esc(e.message)+'<br>Check the URL and that access is set to Anyone.</div>'}
@@ -142,9 +146,45 @@ function txRows(list){
     <small>${day(t)} · ${esc(g(t,"Account"))}${to?" → "+esc(to):""}${g(t,"Category")?" · "+esc(g(t,"Category")):""}</small></div>
     <div class="amt ${ty}">${sign(t)}${money(g(t,"Amount"),"")}<small style="text-align:right">${esc(g(t,"Currency"))}</small></div></div>`}).join("");
 }
+function passes(t){
+  const f=S.f,d=day(t),a=Number(g(t,"Amount"));
+  if(f.type.size&&!f.type.has(g(t,"Type")))return false;
+  if(f.acct.size&&!f.acct.has(g(t,"Account")))return false;
+  if(f.atype.size&&!f.atype.has(S.atype[g(t,"Account")]||""))return false;
+  if(f.cur.size&&!f.cur.has(g(t,"Currency")))return false;
+  if(f.cat.size&&!f.cat.has(g(t,"Category")))return false;
+  if(f.from&&d<f.from)return false;if(f.to&&d>f.to)return false;
+  if(f.min!==""&&a<Number(f.min))return false;if(f.max!==""&&a>Number(f.max))return false;
+  return true;
+}
+function nFilters(){const f=S.f;return f.type.size+f.acct.size+f.atype.size+f.cur.size+f.cat.size+(f.from||f.to?1:0)+(f.min!==""||f.max!==""?1:0)}
 function activity(){
   const q=$("#q").value.toLowerCase();
-  $("#txlist").innerHTML=txRows(q?S.tx.filter(t=>Object.values(t).join(" ").toLowerCase().includes(q)):S.tx.slice(0,200));
+  const list=S.tx.filter(t=>passes(t)&&(!q||Object.values(t).join(" ").toLowerCase().includes(q)));
+  const n=nFilters();$("#fbtn").textContent=n?"Filter · "+n:"Filter";
+  const net={};list.forEach(t=>{const c=g(t,"Currency"),y=g(t,"Type"),v=Number(g(t,"Amount"));net[c]=net[c]||0;
+    if(y==="Income")net[c]+=v;else if(y==="Expense"||y==="Investment")net[c]-=v});
+  $("#fsum").textContent=list.length+" transactions"+(n||q?Object.entries(net).map(([c,v])=>" · net "+money(v,c)).join(""):"");
+  $("#txlist").innerHTML=txRows(list.slice(0,300));
+}
+function filterForm(){
+  const f=S.f,uniq=a=>[...new Set(a.filter(Boolean))].sort();
+  const grp=(l,k,vals)=>vals.length?`<label>${l}</label><div class="chips">${vals.map(v=>`<button class="chip ${f[k].has(v)?"on":""}" data-k="${k}" data-v="${esc(v)}">${esc(v)}</button>`).join("")}</div>`:"";
+  open_(`<h3>Filters</h3>`+grp("Type","type",TYPES)+grp("Currency","cur",uniq(S.tx.map(t=>g(t,"Currency"))))
+   +grp("Account type","atype",uniq(Object.values(S.atype)))+grp("Account","acct",uniq(Object.keys(S.atype)))+grp("Category","cat",uniq(S.tx.map(t=>g(t,"Category"))))
+   +`<label>Date range</label><div class="mrow"><input type="date" id="ff" value="${f.from}"><input type="date" id="ft" value="${f.to}"></div>
+   <div class="chips"><button class="chip" data-p="month">This month</button><button class="chip" data-p="30">Last 30 days</button><button class="chip" data-p="year">This year</button></div>
+   <label>Amount</label><div class="mrow"><input id="fmin" type="number" inputmode="decimal" placeholder="Min" value="${f.min}"><input id="fmax" type="number" inputmode="decimal" placeholder="Max" value="${f.max}"></div>
+   <button class="btn" id="fdone">Show results</button><button class="btn del" id="fclear">Clear all filters</button>`);
+  document.querySelectorAll("#form [data-k]").forEach(c=>c.onclick=()=>{const set=f[c.dataset.k],v=c.dataset.v;
+    set.has(v)?set.delete(v):set.add(v);c.classList.toggle("on",set.has(v));activity()});
+  const sync=()=>{f.from=$("#ff").value;f.to=$("#ft").value;f.min=$("#fmin").value;f.max=$("#fmax").value;activity()};
+  ["#ff","#ft","#fmin","#fmax"].forEach(i=>$(i).oninput=sync);
+  document.querySelectorAll("#form [data-p]").forEach(c=>c.onclick=()=>{
+    const td=new Date().toLocaleDateString("en-CA"),p=c.dataset.p;
+    $("#ft").value=td;$("#ff").value=p==="month"?td.slice(0,7)+"-01":p==="year"?td.slice(0,4)+"-01-01":new Date(Date.now()-30*864e5).toLocaleDateString("en-CA");sync()});
+  $("#fdone").onclick=close_;
+  $("#fclear").onclick=()=>{Object.values(f).forEach(v=>v instanceof Set&&v.clear());f.from=f.to=f.min=f.max="";activity();filterForm()};
 }
 function budgets(){
   const rows=S.bud.filter(b=>b.Month===S.month);
@@ -262,10 +302,12 @@ function tab(n){
 document.querySelectorAll("nav [data-tab]").forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 $("#add").onclick=()=>S.accounts.length?txForm():alert("Connect your sheet first.");
 $("#sync").onclick=load;
-$("#q").oninput=activity;
+$("#q").oninput=activity;$("#fbtn").onclick=filterForm;
 document.addEventListener("click",e=>{const el=e.target.closest(".tx");if(!el)return;
   const t=S.tx.find(x=>String(tid(x))===el.dataset.id);if(t)txForm(t)});
-$("#saveurl").onclick=()=>{URL_=$("#url").value.trim();KEY=$("#key").value.trim();localStorage.setItem("api",URL_);localStorage.setItem("key",KEY);tab("home");load()};
+$("#saveurl").onclick=()=>{URL_=$("#url").value.replace(/[\s\u200B-\u200D\uFEFF"“”]/g,"");KEY=$("#key").value.replace(/[\s\u200B-\u200D\uFEFF"“”]/g,"");
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(URL_)){$("#conn").innerHTML='<span class="err">This is not a web app URL. It must start with https://script.google.com/macros/s/ and end with /exec, with nothing after it.</span>';return}
+  localStorage.setItem("api",URL_);localStorage.setItem("key",KEY);tab("home");load()};
 $("#url").value=URL_;$("#key").value=KEY;
 tab("home");load();
 </script>
