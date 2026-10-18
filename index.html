@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Expenses">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f3f1ec">
+<link rel="apple-touch-icon" href="icon.png">
 <title>Expenses</title>
 <style>
 :root{--bg:#f3f1ec;--card:#fff;--ink:#1c2321;--mute:#7b837f;--line:#e4e1d8;--in:#1f7a5a;--out:#c2432f;--inv:#3a5ba0;--accent:#1c2321}
@@ -44,6 +45,7 @@ label{font-size:13px;color:var(--mute)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px}
 .chip{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:20px;padding:7px 13px;font:inherit;font-size:14px}
 .chip.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:5px;margin-right:8px}
 .btn.del{background:none;color:var(--out);margin-top:6px}
 .bar{height:8px;background:var(--bg);border-radius:4px;margin-top:8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--in);border-radius:4px}.bar i.over{background:var(--out)}
@@ -73,6 +75,9 @@ nav .plus{width:54px;height:54px;border-radius:27px;background:var(--accent);col
     <div class="card"><label>Web app URL</label><input id="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off">
     <label>Secret key</label><input id="key" type="password" autocapitalize="off" autocorrect="off">
     <button class="btn" id="saveurl">Save and connect</button><p class="cur" id="conn"></p></div>
+    <h2>Preferences</h2>
+    <div class="card"><label>Exchange rate: 1 OMR = ? INR</label><input id="rate" type="number" inputmode="decimal" placeholder="e.g. 215"></div>
+    <h2>Savings goals</h2><div class="card" id="goallist"></div><button class="btn" id="newgoal">New goal</button>
     <h2>Manage</h2>
     <div class="card"><button class="btn" id="newacc">Add account</button><button class="btn" id="newcat" style="margin-top:8px">Add category</button></div>
     <h2>Recurring</h2>
@@ -92,7 +97,7 @@ nav .plus{width:54px;height:54px;border-radius:27px;background:var(--accent);col
 
 <script>
 const $=s=>document.querySelector(s), TYPES=["Expense","Income","Investment","Transfer"];
-const S={atype:{},f:{type:new Set(),acct:new Set(),atype:new Set(),cur:new Set(),cat:new Set(),from:"",to:"",min:"",max:""},accounts:[],cats:[],tx:[],bal:[],dash:null,bud:[],rec:[],month:new Date().toISOString().slice(0,7)};
+const S={hm:new Date().toISOString().slice(0,7),cc:"OMR",off:false,goals:JSON.parse(localStorage.getItem("goals")||"[]"),atype:{},f:{type:new Set(),acct:new Set(),atype:new Set(),cur:new Set(),cat:new Set(),from:"",to:"",min:"",max:""},accounts:[],cats:[],tx:[],bal:[],dash:null,bud:[],rec:[],month:new Date().toISOString().slice(0,7)};
 let URL_=localStorage.getItem("api")||"",KEY=localStorage.getItem("key")||"";
 
 /* ---------- API (POST sent as text/plain so Apps Script needs no CORS preflight) ---------- */
@@ -115,29 +120,80 @@ const day=t=>String(g(t,"Date")).slice(0,10);
 const sign=t=>({Income:"+",Expense:"−",Investment:"−",Transfer:""}[g(t,"Type")]||"");
 
 /* ---------- load ---------- */
+function apply(r){
+  const [a,c,t,b,d,bu,rc]=r;
+  S.accounts=a.accounts.filter(x=>String(x.Active).toLowerCase()!=="false");
+  S.cats=c.categories;S.tx=t.transactions.slice().reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.rec=rc.recurring;
+  S.atype=Object.fromEntries(a.accounts.map(x=>[x["Account Name"],x["Account Type"]||""]));render();
+}
+async function flush(){
+  const q=JSON.parse(localStorage.getItem("q")||"[]");if(!q.length)return;const rest=[];
+  for(const b of q){try{await post(b)}catch(e){if(e instanceof TypeError)rest.push(b)}}
+  localStorage.setItem("q",JSON.stringify(rest));
+}
+async function send(b){
+  try{return await post(b)}catch(e){
+    if(e instanceof TypeError&&b.action==="addTransaction"){const q=JSON.parse(localStorage.getItem("q")||"[]");q.push(b);localStorage.setItem("q",JSON.stringify(q));return{queued:true}}
+    throw e}
+}
 async function load(){
   if(!URL_){tab("more");$("#conn").textContent="Paste your Apps Script web app URL to begin.";return}
   $("#sync").textContent="…";
   try{
-    const [a,c,t,b,d,bu,rc]=await Promise.all([get("accounts"),get("categories"),get("transactions"),get("accountBalances"),get("dashboard"),get("budgets"),get("recurring").catch(()=>({recurring:[]}))]);
-    S.accounts=a.accounts.filter(x=>String(x.Active).toLowerCase()!=="false");
-    S.cats=c.categories;S.tx=t.transactions.reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.atype=Object.fromEntries(a.accounts.map(x=>[x["Account Name"],x["Account Type"]||""]));S.rec=rc.recurring;
-    $("#conn").textContent="Connected";render();
-  }catch(e){$("#conn").innerHTML='<span class="err">'+esc(e.message)+'</span>';
-    $("#home").innerHTML='<div class="msg err">Could not load data.<br>'+esc(e.message)+'<br>Check the URL and that access is set to Anyone.</div>'}
+    await flush();
+    const r=await Promise.all([get("accounts"),get("categories"),get("transactions"),get("accountBalances"),get("dashboard"),get("budgets"),get("recurring").catch(()=>({recurring:[]}))]);
+    try{localStorage.setItem("cache",JSON.stringify(r))}catch(_){}
+    S.off=false;apply(r);$("#conn").textContent="Connected";
+  }catch(e){
+    const c=localStorage.getItem("cache");
+    if(c){S.off=true;apply(JSON.parse(c));$("#conn").innerHTML='<span class="err">Offline, showing saved data ('+esc(e.message)+')</span>'}
+    else{$("#conn").innerHTML='<span class="err">'+esc(e.message)+'</span>';
+      $("#home").innerHTML='<div class="msg err">Could not load data.<br>'+esc(e.message)+'<br>Check the URL and key.</div>'}
+  }
   $("#sync").textContent="Refresh";
 }
 
 /* ---------- render ---------- */
-function render(){home();activity();budgets();recur()}
+function render(){home();activity();budgets();recur();goalList()}
+const PAL=["#4cc49a","#ee7a66","#7f9fe0","#e5b95c","#b08be0","#8c9590"];
+const spent=(m,cat,cu)=>S.tx.filter(t=>g(t,"Type")==="Expense"&&day(t).slice(0,7)===m&&g(t,"Category")===cat&&g(t,"Currency")===cu).reduce((s,t)=>s+Number(g(t,"Amount")),0);
+const sumM=(m,cu,ty)=>S.tx.filter(t=>day(t).slice(0,7)===m&&g(t,"Currency")===cu&&g(t,"Type")===ty).reduce((s,t)=>s+Number(g(t,"Amount")),0);
+function donut(items){
+  const tot=items.reduce((s,i)=>s+i.v,0);if(!tot)return '<div class="msg">No expenses in this period</div>';
+  const R=48,C=2*Math.PI*R;let off=0;
+  const arcs=items.map((i,k)=>{const len=i.v/tot*C,el=`<circle r="${R}" cx="60" cy="60" fill="none" stroke="${PAL[k%6]}" stroke-width="20" stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-off}" transform="rotate(-90 60 60)"/>`;off+=len;return el}).join("");
+  const leg=items.map((i,k)=>`<div class="row" style="font-size:14px"><span><i class="dot" style="background:${PAL[k%6]}"></i>${esc(i.n)}</span><b>${Math.round(i.v/tot*100)}%</b></div>`).join("");
+  return `<div style="display:flex;gap:16px;align-items:center"><svg viewBox="0 0 120 120" width="120">${arcs}</svg><div style="flex:1">${leg}</div></div>`;
+}
+function bars(cu){
+  let [y,mo]=(S.hm||new Date().toISOString().slice(0,7)).split("-").map(Number);const ms=[];
+  for(let i=0;i<6;i++){ms.unshift(y+"-"+String(mo).padStart(2,"0"));mo--;if(!mo){mo=12;y--}}
+  const d=ms.map(k=>({k,i:sumM(k,cu,"Income"),e:sumM(k,cu,"Expense")})),mx=Math.max(1,...d.flatMap(x=>[x.i,x.e])),h=v=>v/mx*90;
+  return `<svg viewBox="0 0 300 126" width="100%">${d.map((x,j)=>{const X=j*50+8;return `<rect x="${X}" y="${100-h(x.i)}" width="16" height="${h(x.i)}" rx="3" fill="var(--in)"/><rect x="${X+19}" y="${100-h(x.e)}" width="16" height="${h(x.e)}" rx="3" fill="var(--out)"/><text x="${X+18}" y="118" font-size="10" text-anchor="middle" fill="var(--mute)">${x.k.slice(5)}</text>`}).join("")}</svg><div class="cur"><i class="dot" style="background:var(--in)"></i>Income <i class="dot" style="background:var(--out);margin-left:12px"></i>Spending</div>`;
+}
 function home(){
-  const d=S.dash;let h="";
-  ["OMR","INR"].forEach(c=>{const s=d[c];if(!s)return;
-    h+=`<div class="card"><div class="cur">Net, ${c}</div><div class="big">${money(s.income-s.expenses-s.investments,"")}</div>
-    <div class="stats"><span>Income<b class="Income">${money(s.income,"")}</b></span><span>Spent<b class="Expense">${money(s.expenses,"")}</b></span><span>Invested<b class="Investment">${money(s.investments,"")}</b></span></div></div>`});
+  const m=S.hm,ts=S.tx.filter(t=>!m||day(t).slice(0,7)===m),R=Number(localStorage.getItem("rate"))||0,cu=["OMR","INR"];
+  const sm=(c,ty)=>ts.filter(t=>g(t,"Currency")===c&&g(t,"Type")===ty).reduce((s,t)=>s+Number(g(t,"Amount")),0);
+  let h=(S.off?'<div class="msg err" style="padding:4px">Offline, showing saved data</div>':"")+`<div class="mrow"><input type="month" id="hm" value="${m}"><button class="ib" id="hall">All time</button></div>`;
+  const net={};
+  cu.forEach(c=>{if(!S.tx.some(t=>g(t,"Currency")===c))return;const i=sm(c,"Income"),e=sm(c,"Expense"),v=sm(c,"Investment");net[c]=i-e-v;
+    h+=`<div class="card"><div class="cur">Net, ${c} · ${m||"all time"}</div><div class="big">${money(net[c],"")}</div>
+    <div class="stats"><span>Income<b class="Income">${money(i,"")}</b></span><span>Spent<b class="Expense">${money(e,"")}</b></span><span>Invested<b class="Investment">${money(v,"")}</b></span></div></div>`});
+  if(R&&net.OMR!==undefined&&net.INR!==undefined)h+=`<div class="card"><div class="cur">Combined, in OMR (1 OMR = ${R} INR)</div><div class="big">${money(net.OMR+net.INR/R,"")}</div></div>`;
+  const bm=m||new Date().toISOString().slice(0,7);
+  const risk=S.bud.filter(b=>b.Month===bm&&b["Budget Amount"]).map(b=>({b,sp:spent(bm,b.Category,b.Currency)})).filter(x=>x.sp/x.b["Budget Amount"]>=.8);
+  if(risk.length)h+="<h2>Budget alerts</h2><div class='card'>"+risk.map(x=>{const p=Math.round(x.sp/x.b["Budget Amount"]*100);return `<div class="acc row"><span>${esc(x.b.Category)}</span><b class="${p>100?"Expense":""}">${p}% · ${money(x.sp,"")} / ${money(x.b["Budget Amount"],x.b.Currency)}</b></div>`}).join("")+"</div>";
+  const cc=S.cc,by={};ts.filter(t=>g(t,"Type")==="Expense"&&g(t,"Currency")===cc).forEach(t=>{const k=g(t,"Category")||"Other";by[k]=(by[k]||0)+Number(g(t,"Amount"))});
+  let it=Object.entries(by).map(([n,v])=>({n,v})).sort((a,b)=>b.v-a.v);
+  if(it.length>5){const o=it.slice(5).reduce((s,x)=>s+x.v,0);it=it.slice(0,5).concat({n:"Other",v:o})}
+  h+=`<h2>Spending by category</h2><div class="card"><div class="seg" style="grid-template-columns:1fr 1fr">${cu.map(c=>`<button data-cc="${c}" class="${c===cc?"on":""}">${c}</button>`).join("")}</div>${donut(it)}</div><h2>Last 6 months, ${cc}</h2><div class="card">${bars(cc)}</div>`;
+  if(S.goals.length)h+="<h2>Goals</h2><div class='card'>"+S.goals.map(gl=>{const b=S.bal.find(x=>x.accountName===gl.a),cur=b?b.currentBalance:0,p=Math.min(100,Math.max(0,cur/gl.t*100));
+    return `<div class="acc"><div class="row"><span>${esc(gl.n)}</span><b>${Math.round(p)}%</b></div><small>${money(cur,b?b.currency:"")} of ${money(gl.t,"")}</small><div class="bar"><i style="width:${p}%"></i></div></div>`}).join("")+"</div>";
   h+="<h2>Accounts</h2><div class='card'>"+(S.bal.map(b=>`<div class="acc row"><div>${esc(b.accountName)}<br><small>${esc(b.accountType)}</small></div><b>${money(b.currentBalance,b.currency)}</b></div>`).join("")||'<div class="msg">No accounts yet</div>')+"</div>";
   h+="<h2>Recent</h2><div class='card'>"+txRows(S.tx.slice(0,5))+"</div>";
   $("#home").innerHTML=h;
+  $("#hm").onchange=e=>{S.hm=e.target.value;home()};$("#hall").onclick=()=>{S.hm="";home()};
+  document.querySelectorAll("[data-cc]").forEach(b=>b.onclick=()=>{S.cc=b.dataset.cc;home()});
 }
 function txRows(list){
   if(!list.length)return '<div class="msg">No transactions</div>';
@@ -158,9 +214,10 @@ function passes(t){
   return true;
 }
 function nFilters(){const f=S.f;return f.type.size+f.acct.size+f.atype.size+f.cur.size+f.cat.size+(f.from||f.to?1:0)+(f.min!==""||f.max!==""?1:0)}
+function filtered(){const q=$("#q").value.toLowerCase();return S.tx.filter(t=>passes(t)&&(!q||Object.values(t).join(" ").toLowerCase().includes(q)))}
 function activity(){
   const q=$("#q").value.toLowerCase();
-  const list=S.tx.filter(t=>passes(t)&&(!q||Object.values(t).join(" ").toLowerCase().includes(q)));
+  const list=filtered();
   const n=nFilters();$("#fbtn").textContent=n?"Filter · "+n:"Filter";
   const net={};list.forEach(t=>{const c=g(t,"Currency"),y=g(t,"Type"),v=Number(g(t,"Amount"));net[c]=net[c]||0;
     if(y==="Income")net[c]+=v;else if(y==="Expense"||y==="Investment")net[c]-=v});
@@ -175,7 +232,7 @@ function filterForm(){
    +`<label>Date range</label><div class="mrow"><input type="date" id="ff" value="${f.from}"><input type="date" id="ft" value="${f.to}"></div>
    <div class="chips"><button class="chip" data-p="month">This month</button><button class="chip" data-p="30">Last 30 days</button><button class="chip" data-p="year">This year</button></div>
    <label>Amount</label><div class="mrow"><input id="fmin" type="number" inputmode="decimal" placeholder="Min" value="${f.min}"><input id="fmax" type="number" inputmode="decimal" placeholder="Max" value="${f.max}"></div>
-   <button class="btn" id="fdone">Show results</button><button class="btn del" id="fclear">Clear all filters</button>`);
+   <button class="btn" id="fdone">Show results</button><button class="btn" id="fexp" style="margin-top:8px;background:var(--bg);color:var(--ink);border:1px solid var(--line)">Export results (CSV)</button><button class="btn del" id="fclear">Clear all filters</button>`);
   document.querySelectorAll("#form [data-k]").forEach(c=>c.onclick=()=>{const set=f[c.dataset.k],v=c.dataset.v;
     set.has(v)?set.delete(v):set.add(v);c.classList.toggle("on",set.has(v));activity()});
   const sync=()=>{f.from=$("#ff").value;f.to=$("#ft").value;f.min=$("#fmin").value;f.max=$("#fmax").value;activity()};
@@ -183,7 +240,7 @@ function filterForm(){
   document.querySelectorAll("#form [data-p]").forEach(c=>c.onclick=()=>{
     const td=new Date().toLocaleDateString("en-CA"),p=c.dataset.p;
     $("#ft").value=td;$("#ff").value=p==="month"?td.slice(0,7)+"-01":p==="year"?td.slice(0,4)+"-01-01":new Date(Date.now()-30*864e5).toLocaleDateString("en-CA");sync()});
-  $("#fdone").onclick=close_;
+  $("#fdone").onclick=close_;$("#fexp").onclick=()=>exportCsv(filtered());
   $("#fclear").onclick=()=>{Object.values(f).forEach(v=>v instanceof Set&&v.clear());f.from=f.to=f.min=f.max="";activity();filterForm()};
 }
 function budgets(){
@@ -205,8 +262,8 @@ function close_(){$("#sheet").classList.remove("on")}
 $("#sheet").onclick=e=>{if(e.target.id==="sheet")close_()};
 
 function txForm(t){
-  const edit=!!t,v=k=>t?g(t,k):"";let type=edit?v("Type"):"Expense";
-  open_(`<h3>${edit?"Edit":"New"} transaction</h3>
+  const L=JSON.parse(localStorage.getItem("last")||"{}"),edit=!!t,v=k=>t?g(t,k):({Account:L.acc,Category:L.cat}[k]||"");let type=edit?v("Type"):(L.type||"Expense");
+  open_(`<h3>${edit?"Edit":"New"} transaction</h3>${edit?"":tplHtml()}
   <div class="seg">${TYPES.map(x=>`<button data-ty="${x}" class="${x===type?"on":""}">${x}</button>`).join("")}</div>
   <label>Amount</label><input id="f_amt" type="number" inputmode="decimal" step="0.001" value="${v("Amount")}">
   <label>Account</label><select id="f_acc">${S.accounts.map(a=>`<option ${a["Account Name"]===v("Account")?"selected":""}>${esc(a["Account Name"])} (${esc(a.Currency)})</option>`).join("")}</select>
@@ -225,12 +282,15 @@ function txForm(t){
     $("#f_cat").innerHTML='<option value=""></option>'+opts.map(o=>`<option ${o===v("Category")?"selected":""}>${esc(o)}</option>`).join("");
   };
   document.querySelectorAll("[data-ty]").forEach(b=>b.onclick=()=>{type=b.dataset.ty;sync()});sync();
+  document.querySelectorAll("[data-tp]").forEach(b=>b.onclick=()=>{const p=TPL[b.dataset.tp];type=p.ty;
+    const o=[...$("#f_acc").options].find(x=>x.text.replace(/ \([A-Z]{3}\)$/,"")===p.acc);if(o)$("#f_acc").value=o.value;
+    sync();$("#f_cat").value=p.cat;$("#f_desc").value=p.desc;$("#f_amt").value=p.amt});
   $("#f_save").onclick=async()=>{
     const body={action:edit?"updateTransaction":"addTransaction",transactionId:edit?tid(t):undefined,type,account:accName(),
       transferToAccount:type==="Transfer"?$("#f_to").value:"",category:type==="Transfer"?"":$("#f_cat").value,
       amount:Number($("#f_amt").value),date:$("#f_date").value,description:$("#f_desc").value,remarks:$("#f_rem").value};
     $("#f_save").disabled=true;
-    try{await post(body);close_();await load()}catch(e){$("#f_err").textContent=e.message;$("#f_save").disabled=false}
+    try{if(!edit)localStorage.setItem("last",JSON.stringify({acc:body.account,cat:body.category,type}));const r=await send(body);close_();if(r.queued)alert("No connection. Saved on this phone and will sync when you are back online.");else await afterSave(body)}catch(e){$("#f_err").textContent=e.message;$("#f_save").disabled=false}
   };
   if(edit)$("#f_del").onclick=async()=>{if(!confirm("Delete this transaction?"))return;
     try{await post({action:"deleteTransaction",transactionId:tid(t)});close_();await load()}catch(e){$("#f_err").textContent=e.message}};
@@ -293,6 +353,39 @@ $("#newacc").onclick=()=>URL_?accForm():alert("Connect your sheet first.");
 $("#newcat").onclick=()=>URL_?catForm():alert("Connect your sheet first.");
 $("#runrec").onclick=async()=>{try{const r=await post({action:"processRecurring"});alert(r.message);await load()}catch(x){alert(x.message)}};
 
+let TPL=[];
+function tpls(){const m={};S.tx.slice(0,300).forEach(t=>{const d=g(t,"Description");if(!d||g(t,"Type")==="Transfer")return;const k=d+"|"+g(t,"Account");
+  m[k]=m[k]||{n:0,ty:g(t,"Type"),acc:g(t,"Account"),cat:g(t,"Category"),desc:d,amt:g(t,"Amount")};m[k].n++});return Object.values(m).sort((a,b)=>b.n-a.n).slice(0,6)}
+function tplHtml(){TPL=tpls();return TPL.length?'<label>Quick add</label><div class="chips">'+TPL.map((p,i)=>`<button class="chip" data-tp="${i}">${esc(p.desc)}</button>`).join("")+"</div>":""}
+async function afterSave(b){
+  await load();
+  if(b.action!=="addTransaction"||b.type!=="Expense")return;
+  const cu=(S.accounts.find(a=>a["Account Name"]===b.account)||{}).Currency,m=String(b.date).slice(0,7);
+  const bd=S.bud.find(x=>x.Month===m&&x.Category===b.category&&x.Currency===cu);if(!bd||!bd["Budget Amount"])return;
+  const sp=spent(m,b.category,cu),p=Math.round(sp/bd["Budget Amount"]*100);
+  if(p>=80)alert(p>100?`Over budget: ${b.category} is at ${p}% (${money(sp,cu)} of ${money(bd["Budget Amount"],cu)}).`:`${b.category} budget is ${p}% used.`);
+}
+async function exportCsv(list){
+  const cols=Object.keys(S.tx[0]||{}),q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const csv=[cols.map(q).join(",")].concat(list.map(t=>cols.map(c=>q(t[c])).join(","))).join("\n");
+  const f=new File([csv],"transactions.csv",{type:"text/csv"});
+  try{if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f]});
+  else{const a=document.createElement("a");a.href=window.URL.createObjectURL(f);a.download="transactions.csv";a.click()}}catch(_){}
+}
+function goalList(){
+  $("#goallist").innerHTML=S.goals.length?S.goals.map((x,i)=>`<div class="acc row" data-g="${i}"><span>${esc(x.n)}<br><small>${esc(x.a)}</small></span><b>${money(x.t,"")}</b></div>`).join(""):'<div class="msg">No goals yet</div>';
+  document.querySelectorAll("[data-g]").forEach(el=>el.onclick=()=>goalForm(+el.dataset.g));
+}
+function goalForm(i){
+  const x=S.goals[i]||{n:"",t:"",a:""};
+  open_(`<h3>${S.goals[i]?"Edit":"New"} goal</h3><label>Name</label><input id="g_n" value="${esc(x.n)}"><label>Target amount</label><input id="g_t" type="number" inputmode="decimal" value="${x.t}">
+  <label>Tracked by account balance</label><select id="g_a">${S.accounts.map(a=>`<option ${a["Account Name"]===x.a?"selected":""}>${esc(a["Account Name"])}</option>`).join("")}</select>
+  <button class="btn" id="g_s">Save goal</button>${S.goals[i]?'<button class="btn del" id="g_d">Delete goal</button>':""}`);
+  const sv=()=>{localStorage.setItem("goals",JSON.stringify(S.goals));close_();render()};
+  $("#g_s").onclick=()=>{const o={n:$("#g_n").value.trim(),t:Number($("#g_t").value),a:$("#g_a").value};if(!o.n||!o.t)return;S.goals[i]?S.goals[i]=o:S.goals.push(o);sv()};
+  if(S.goals[i])$("#g_d").onclick=()=>{S.goals.splice(i,1);sv()};
+}
+
 /* ---------- navigation ---------- */
 function tab(n){
   document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===n));
@@ -309,6 +402,18 @@ $("#saveurl").onclick=()=>{URL_=$("#url").value.replace(/[\s\u200B-\u200D\uFEFF"
   if(!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(URL_)){$("#conn").innerHTML='<span class="err">This is not a web app URL. It must start with https://script.google.com/macros/s/ and end with /exec, with nothing after it.</span>';return}
   localStorage.setItem("api",URL_);localStorage.setItem("key",KEY);tab("home");load()};
 $("#url").value=URL_;$("#key").value=KEY;
+$("#rate").value=localStorage.getItem("rate")||"";$("#rate").onchange=e=>{localStorage.setItem("rate",e.target.value);home()};
+$("#newgoal").onclick=()=>S.accounts.length?goalForm():alert("Connect your sheet first.");
+const mn=document.querySelector("main");let y0=null;
+mn.addEventListener("touchstart",e=>{y0=mn.scrollTop===0?e.touches[0].clientY:null},{passive:true});
+mn.addEventListener("touchend",e=>{if(y0!==null&&e.changedTouches[0].clientY-y0>110)load();y0=null});
+let sx=null,sy=0;
+document.addEventListener("touchstart",e=>{const el=e.target.closest("#txlist .tx");sx=el?e.touches[0].clientX:null;sy=e.touches[0].clientY},{passive:true});
+document.addEventListener("touchend",async e=>{const el=e.target.closest("#txlist .tx");if(!el||sx===null)return;
+  const dx=e.changedTouches[0].clientX-sx,dy=Math.abs(e.changedTouches[0].clientY-sy);sx=null;
+  if(dx<-90&&dy<30&&confirm("Delete this transaction?")){try{await post({action:"deleteTransaction",transactionId:el.dataset.id});await load()}catch(x){alert(x.message)}}});
+window.addEventListener("online",load);
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 tab("home");load();
 </script>
 </body>
