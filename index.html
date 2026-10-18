@@ -46,6 +46,7 @@ label{font-size:13px;color:var(--mute)}
 .chip{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:20px;padding:7px 13px;font:inherit;font-size:14px}
 .chip.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .dot{display:inline-block;width:9px;height:9px;border-radius:5px;margin-right:8px}
+.fhead{position:sticky;top:0;z-index:2;background:var(--card);display:flex;justify-content:space-between;align-items:center;margin:-18px -18px 10px;padding:12px 10px 10px;border-bottom:1px solid var(--line)}
 .btn.del{background:none;color:var(--out);margin-top:6px}
 .bar{height:8px;background:var(--bg);border-radius:4px;margin-top:8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--in);border-radius:4px}.bar i.over{background:var(--out)}
@@ -123,7 +124,7 @@ const sign=t=>({Income:"+",Expense:"−",Investment:"−",Transfer:""}[g(t,"Type
 function apply(r){
   const [a,c,t,b,d,bu,rc]=r;
   S.accounts=a.accounts.filter(x=>String(x.Active).toLowerCase()!=="false");
-  S.cats=c.categories;S.tx=t.transactions.slice().reverse();S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.rec=rc.recurring;
+  S.cats=c.categories;S.tx=t.transactions.slice().reverse();S.tx.forEach(x=>{x.Currency=String(x.Currency||"").trim().toUpperCase();x.Type=String(x.Type||"").trim()});S.bal=b.balances;S.dash=d;S.bud=bu.budgets;S.rec=rc.recurring;
   S.atype=Object.fromEntries(a.accounts.map(x=>[x["Account Name"],x["Account Type"]||""]));render();
 }
 async function flush(){
@@ -176,8 +177,8 @@ function home(){
   const sm=(c,ty)=>ts.filter(t=>g(t,"Currency")===c&&g(t,"Type")===ty).reduce((s,t)=>s+Number(g(t,"Amount")),0);
   let h=(S.off?'<div class="msg err" style="padding:4px">Offline, showing saved data</div>':"")+`<div class="mrow"><input type="month" id="hm" value="${m}"><button class="ib" id="hall">All time</button></div>`;
   const net={};
-  cu.forEach(c=>{if(!S.tx.some(t=>g(t,"Currency")===c))return;const i=sm(c,"Income"),e=sm(c,"Expense"),v=sm(c,"Investment");net[c]=i-e-v;
-    h+=`<div class="card"><div class="cur">Net, ${c} · ${m||"all time"}</div><div class="big">${money(net[c],"")}</div>
+  cu.forEach(c=>{if(!S.tx.some(t=>g(t,"Currency")===c)&&!S.bal.some(b=>String(b.currency).toUpperCase()===c))return;const i=sm(c,"Income"),e=sm(c,"Expense"),v=sm(c,"Investment");const op=S.bal.filter(b=>String(b.currency).toUpperCase()===c);net[c]=m?i-e-v:op.reduce((x,b)=>x+Number(b.currentBalance||0),0);
+    h+=`<div class="card"><div class="cur">${m?"Net flow":"Net worth"}, ${c} · ${m||"all time"}</div><div class="big">${money(net[c],"")}</div>${m?"":`<div class="cur" style="margin-top:4px">Includes opening balances of ${money(op.reduce((x,b)=>x+Number(b.openingBalance||0),0),"")}</div>`}
     <div class="stats"><span>Income<b class="Income">${money(i,"")}</b></span><span>Spent<b class="Expense">${money(e,"")}</b></span><span>Invested<b class="Investment">${money(v,"")}</b></span></div></div>`});
   if(R&&net.OMR!==undefined&&net.INR!==undefined)h+=`<div class="card"><div class="cur">Combined, in OMR (1 OMR = ${R} INR)</div><div class="big">${money(net.OMR+net.INR/R,"")}</div></div>`;
   const bm=m||new Date().toISOString().slice(0,7);
@@ -227,21 +228,20 @@ function activity(){
 function filterForm(){
   const f=S.f,uniq=a=>[...new Set(a.filter(Boolean))].sort();
   const grp=(l,k,vals)=>vals.length?`<label>${l}</label><div class="chips">${vals.map(v=>`<button class="chip ${f[k].has(v)?"on":""}" data-k="${k}" data-v="${esc(v)}">${esc(v)}</button>`).join("")}</div>`:"";
-  open_(`<h3>Filters</h3>`+grp("Type","type",TYPES)+grp("Currency","cur",uniq(S.tx.map(t=>g(t,"Currency"))))
-   +grp("Account type","atype",uniq(Object.values(S.atype)))+grp("Account","acct",uniq(Object.keys(S.atype)))+grp("Category","cat",uniq(S.tx.map(t=>g(t,"Category"))))
+  open_(`<div class="fhead"><button class="ib" id="fclear">Clear all</button><b>Filters</b><button class="ib" id="fdone" style="color:var(--ink);font-weight:600">Done</button></div>`+grp("Type","type",TYPES)+grp("Currency","cur",uniq(S.tx.map(t=>g(t,"Currency"))))
+   +grp("Account","acct",uniq(Object.keys(S.atype)))+grp("Category","cat",uniq(S.tx.map(t=>g(t,"Category"))))
    +`<label>Date range</label><div class="mrow"><input type="date" id="ff" value="${f.from}"><input type="date" id="ft" value="${f.to}"></div>
    <div class="chips"><button class="chip" data-p="month">This month</button><button class="chip" data-p="30">Last 30 days</button><button class="chip" data-p="year">This year</button></div>
-   <label>Amount</label><div class="mrow"><input id="fmin" type="number" inputmode="decimal" placeholder="Min" value="${f.min}"><input id="fmax" type="number" inputmode="decimal" placeholder="Max" value="${f.max}"></div>
-   <button class="btn" id="fdone">Show results</button><button class="btn" id="fexp" style="margin-top:8px;background:var(--bg);color:var(--ink);border:1px solid var(--line)">Export results (CSV)</button><button class="btn del" id="fclear">Clear all filters</button>`);
+   <button class="btn" id="fexp" style="background:var(--bg);color:var(--ink);border:1px solid var(--line)">Export results (CSV)</button>`);
   document.querySelectorAll("#form [data-k]").forEach(c=>c.onclick=()=>{const set=f[c.dataset.k],v=c.dataset.v;
     set.has(v)?set.delete(v):set.add(v);c.classList.toggle("on",set.has(v));activity()});
-  const sync=()=>{f.from=$("#ff").value;f.to=$("#ft").value;f.min=$("#fmin").value;f.max=$("#fmax").value;activity()};
-  ["#ff","#ft","#fmin","#fmax"].forEach(i=>$(i).oninput=sync);
+  const sync=()=>{f.from=$("#ff").value;f.to=$("#ft").value;activity()};
+  ["#ff","#ft"].forEach(i=>$(i).oninput=sync);
   document.querySelectorAll("#form [data-p]").forEach(c=>c.onclick=()=>{
     const td=new Date().toLocaleDateString("en-CA"),p=c.dataset.p;
     $("#ft").value=td;$("#ff").value=p==="month"?td.slice(0,7)+"-01":p==="year"?td.slice(0,4)+"-01-01":new Date(Date.now()-30*864e5).toLocaleDateString("en-CA");sync()});
   $("#fdone").onclick=close_;$("#fexp").onclick=()=>exportCsv(filtered());
-  $("#fclear").onclick=()=>{Object.values(f).forEach(v=>v instanceof Set&&v.clear());f.from=f.to=f.min=f.max="";activity();filterForm()};
+  $("#fclear").onclick=()=>{Object.values(f).forEach(v=>v instanceof Set&&v.clear());f.from=f.to=f.min=f.max="";document.querySelectorAll("#form .chip.on").forEach(c=>c.classList.remove("on"));$("#ff").value=$("#ft").value="";activity()};
 }
 function budgets(){
   const rows=S.bud.filter(b=>b.Month===S.month);
